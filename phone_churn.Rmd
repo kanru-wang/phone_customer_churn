@@ -1,0 +1,59 @@
+---
+title: "phone_churn"
+output: html_notebook
+---
+
+```{r}
+library(mlr)
+library(readr)
+data <- read_csv("E:/bitbucket_warehouse/side_projects/phone_churn/dataset/ACMETelephoneABT.csv")
+```
+
+```{r}
+table(data$churn)
+```
+
+```{r}
+sapply(data, function(x) sum(is.na(x)))
+```
+
+```{r}
+data$occupation[is.na(data$occupation)] = 'missing'
+data$regionType[is.na(data$regionType)] = 'missing'
+```
+
+```{r}
+data$customer = NULL
+```
+
+```{r}
+data_no_handling = data
+```
+
+
+```{r}
+hist(data$age)
+```
+
+```{r}
+imp = impute(data, target = "churn", 
+             Wind = imputeLearner("classif.cforest")), 
+regr.cforest
+              dummy.cols = c("Solar.R", "Wind"))
+```
+
+
+1. For numHandsets, if we will use Logistic Regression, We need to bin any value >= say 5 as 5 (as a bin). 
+2. For Naive Bayes from e1071 assumes that the numerical variable is normally distributed, but here it is exponentially distributed. So we need to bin any value >= say 5 as a bin, and then dummify this column.
+3. For KNN, since value 5 is closer to 7 then to 3, we need to bin any value >= say 5 as 5 (as a bin), before normalising this column.
+4. No need to do anything to this column if we use tree based models.
+
+```{r}
+table(data$numHandsets)
+```
+
+
+
+
+
+
