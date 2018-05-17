@@ -18,8 +18,8 @@ sapply(data, function(x) sum(is.na(x)))
 ```
 
 ```{r}
-data$occupation[is.na(data$occupation)] = 'missing'
-data$regionType[is.na(data$regionType)] = 'missing'
+data$occupation[is.na(data$occupation)] = 'missing' #Too many NAs in occupation. Assign missing. No imputing.
+#data$regionType[is.na(data$regionType)] = 'missing'
 ```
 
 ```{r}
@@ -30,20 +30,76 @@ data$customer = NULL
 data_no_handling = data
 ```
 
-
 ```{r}
-hist(data$age)
+table(data$regionType)
 ```
 
 ```{r}
-imp = impute(data, target = "churn", 
-             Wind = imputeLearner("classif.cforest")), 
-regr.cforest
-              dummy.cols = c("Solar.R", "Wind"))
+data$regionType[data$regionType == 'r'] = 'rural'
+data$regionType[data$regionType == 's'] = 'suburban'
+data$regionType[data$regionType == 't'] = 'town'
+data$regionType[data$regionType == 'unknown'] = NA
+```
+
+```{r}
+table(data$creditCard)
+```
+
+```{r}
+data$creditCard[data$creditCard == 'f'] = 'false'
+data$creditCard[data$creditCard == 'no'] = 'false'
+data$creditCard[data$creditCard == 't'] = 'true'
+data$creditCard[data$creditCard == 'yes'] = 'true'
 ```
 
 
-1. For numHandsets, if we will use Logistic Regression, We need to bin any value >= say 5 as 5 (as a bin). 
+```{r}
+data = as.data.frame(unclass(data), stringsAsFactors=TRUE) # Imputer requires factors.
+```
+
+
+```{r}
+table(imp$data$regionType)
+```
+
+```{r}
+
+```
+
+
+```{r}
+hist(imp$data$age)
+```
+
+Is zero currentHandsetPrice due to value being missing or customers getting free phones from mobile plans?
+Choosing the later is safer.
+```{r}
+table(data$currentHandsetPrice)
+```
+
+```{r}
+data$age[data$age == 0] = NA
+
+
+```
+
+See a whole list of available imputation learners by running the two lines in below.
+For numerical missing values:   listLearners("regr", properties = "missings")[c("class", "package")]
+For categorical missing values: listLearners("classif", properties = "missings")[c("class", "package")]
+```{r}
+imp = impute(data, 
+             target = "churn", # Tell the algorithm not to use information in the target column for imputation.
+             cols = list(
+                 regionType = imputeLearner("classif.cforest"),
+                 age = imputeLearner("regr.cforest")
+             )
+
+             #dummy.cols = c("Solar.R", "Wind")
+             )
+```
+
+For numHandsets:
+1. For Logistic Regression, we need to bin any value >= say 5 as 5 (as a bin). 
 2. For Naive Bayes from e1071 assumes that the numerical variable is normally distributed, but here it is exponentially distributed. So we need to bin any value >= say 5 as a bin, and then dummify this column.
 3. For KNN, since value 5 is closer to 7 then to 3, we need to bin any value >= say 5 as 5 (as a bin), before normalising this column.
 4. No need to do anything to this column if we use tree based models.
