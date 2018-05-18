@@ -28,8 +28,16 @@ sapply(data, function(x) sum(is.na(x)))
 ```
 
 ### occupation
+Too many NAs in occupation. Assign missing. No imputing.
 ```{r}
-data$occupation[is.na(data$occupation)] = 'missing' #Too many NAs in occupation. Assign missing. No imputing.
+data$occupation[is.na(data$occupation)] = 'missing'
+```
+
+### Small fix
+As of May 2018, createDummyFeatures, the function that will be used for dummification, has column naming problem. Need to change "true" to "yes", "false" to "no".
+```{r}
+data[data == 'true'] = 'yes'
+data[data == 'false'] = 'no'
 ```
 
 ### Save a copy
@@ -144,23 +152,17 @@ levels(data_imputed$regionType) = c(levels(data_imputed$regionType), 'missing')
 data_imputed$regionType[is.na(data_imputed$regionType)] = 'missing'
 ```
 
-## Dummify
-
-In this example, for each categorical variable column, for n factor levels there will be n - 1 dummy variables (the first factor level will be dropped).
-```{r}
-data_dummified = createDummyFeatures(data_imputed, target = 'churn', method = "reference", cols = NULL)
-```
-
-## The data is now ready for tree based models. Need more processing steps to get it ready for KNN.
+## Now if we jump to run the "Dummify" chunk, the data will be ready for tree based models. Here we just need more processing steps to get it ready for KNN.
 
 ## Logging, a special handling for this example
 
 We will log all exponentially distributed columns. The zero values will be seperated from other values, which will enable the distances considered in KNN to reflect the context.
 
 This transformation still will not make the variable normal enough for Naive Bayes' assumption. 
+
 ```{r}
 library(MASS)
-x = log(data_dummified$currentHandsetPrice + 1)
+x = log(data_imputed$currentHandsetPrice + 1)
 fit <- fitdistr(x, "normal")
 para <- fit$estimate
 hist(x, prob = TRUE, breaks = 30)
@@ -169,33 +171,49 @@ curve(dnorm(x, para[1], para[2]), col = 2, add = TRUE)
 
 
 ```{r}
-data_dummified$numHandsets = log(data_dummified$numHandsets)
-data_dummified$currentHandsetPrice = log(data_dummified$currentHandsetPrice + 1)
-data_dummified$avgOverBundleMins = log(data_dummified$avgOverBundleMins + 1)
-data_dummified$avgRoamCalls = log(data_dummified$avgRoamCalls + 1)
-data_dummified$avgReceivedMins = log(data_dummified$avgReceivedMins + 1)
-data_dummified$avgOutCalls = log(data_dummified$avgOutCalls + 1)
-data_dummified$avgInCalls = log(data_dummified$avgInCalls + 1)
-data_dummified$peakOffPeakRatio = log(data_dummified$peakOffPeakRatio + 1)
-data_dummified$avgDroppedCalls = log(data_dummified$avgDroppedCalls + 1)
-data_dummified$lastMonthCustomerCareCalls = log(data_dummified$lastMonthCustomerCareCalls + 1)
-data_dummified$numRetentionCalls = log(data_dummified$numRetentionCalls + 1)
-data_dummified$numRetentionOffersAccepted = log(data_dummified$numRetentionOffersAccepted + 1)
-data_dummified$newFrequentNumbers = log(data_dummified$newFrequentNumbers + 1)
+data_imputed$numHandsets = log(data_imputed$numHandsets)
+data_imputed$currentHandsetPrice = log(data_imputed$currentHandsetPrice + 1)
+data_imputed$avgOverBundleMins = log(data_imputed$avgOverBundleMins + 1)
+data_imputed$avgRoamCalls = log(data_imputed$avgRoamCalls + 1)
+data_imputed$avgReceivedMins = log(data_imputed$avgReceivedMins + 1)
+data_imputed$avgOutCalls = log(data_imputed$avgOutCalls + 1)
+data_imputed$avgInCalls = log(data_imputed$avgInCalls + 1)
+data_imputed$peakOffPeakRatio = log(data_imputed$peakOffPeakRatio + 1)
+data_imputed$avgDroppedCalls = log(data_imputed$avgDroppedCalls + 1)
+data_imputed$lastMonthCustomerCareCalls = log(data_imputed$lastMonthCustomerCareCalls + 1)
+data_imputed$numRetentionCalls = log(data_imputed$numRetentionCalls + 1)
+data_imputed$numRetentionOffersAccepted = log(data_imputed$numRetentionOffersAccepted + 1)
+data_imputed$newFrequentNumbers = log(data_imputed$newFrequentNumbers + 1)
 ```
 
 ## Standardisation
 
 ```{r}
-nums <- unlist(lapply(x, function(x) max(x) == 1 ))  
+numerical_col_index <- unlist(lapply(data_imputed, is.numeric))  # For all numerical columns
+data_standardised = lapply(data_imputed[ , numerical_col_index], standardize) # Standardise it
+```
 
-data_standardised = sapply(data_dummified, Standardisation)#function(x) sum(is.na(x)))
+Check if mean is close to 0 and standard deviation is 1.
+```{r}
+mean(data_standardised$currentHandsetPrice)
+sd(data_standardised$currentHandsetPrice)
+```
+
+Combine the standardised numerical column dataframe with the rest, i.e. the categorical column dataframe.
+```{r}
+categorical_col_index = !numerical_col_index
+data_standardised = cbind(data_standardised, data_imputed[ , categorical_col_index])
 ```
 
 
+## Dummify
+
+In this example, for each categorical variable column, for n factor levels there will be n - 1 dummy variables (the first factor level will be dropped).
+```{r}
+data_dummified = createDummyFeatures(data_standardised, target = 'churn', method = "reference", cols = NULL)
+```
 
 
-## Split data
 
 
 
