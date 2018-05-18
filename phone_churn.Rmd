@@ -9,27 +9,39 @@ library(readr)
 data <- read_csv("E:/bitbucket_warehouse/side_projects/phone_churn/dataset/ACMETelephoneABT.csv")
 ```
 
+We call a dataset imbalanced when the target variable is dominated by one class. Always, we more care about the minority class(es) than the dominant (majority) class. When we train a model, the training aims to reduce the error rate. The trained model may reluctantly or over-conservatively classify any observation as the minority class. Adjusting the classfication threshold in order to create more minority predictions is a good fix, but more can be done. We can make the dataset less imbalanced so that the model really learn about the characteristics of the minority class observations.
+
+This dataset is perfectly balanced as the company that provided this dataset had already undersampled the majority class (customer who stay), while keep all minority customer rows (churned customers). In reality, we may instead oversample the abnormal customers, while keep all normal customers. It is not necessary to make two classes 50% 50% balanced.
+
 ```{r}
 table(data$churn)
 ```
 
+# Data processing
+Notice that only columns that need modifications are mentioned.
+
+### How many values are missing in each column?
 ```{r}
 sapply(data, function(x) sum(is.na(x)))
 ```
 
+### occupation
 ```{r}
 data$occupation[is.na(data$occupation)] = 'missing' #Too many NAs in occupation. Assign missing. No imputing.
-#data$regionType[is.na(data$regionType)] = 'missing'
 ```
 
+### Save a copy
+```{r}
+data_no_handling = data
+data_no_handling$regionType[is.na(data_no_handling$regionType)] = 'missing'
+```
+
+### This is an unnecessary index column.
 ```{r}
 data$customer = NULL
 ```
 
-```{r}
-data_no_handling = data
-```
-
+### regionType
 ```{r}
 table(data$regionType)
 ```
@@ -41,6 +53,8 @@ data$regionType[data$regionType == 't'] = 'town'
 data$regionType[data$regionType == 'unknown'] = NA
 ```
 
+
+### creditCard
 ```{r}
 table(data$creditCard)
 ```
@@ -52,35 +66,42 @@ data$creditCard[data$creditCard == 't'] = 'true'
 data$creditCard[data$creditCard == 'yes'] = 'true'
 ```
 
+### numHandsets
+
+numHandsets is just one of numerical columns which require different handling for different models. 
+1. For Logistic Regression, we need to bin any value >= say 5 as 5 (as a bin). 
+2. For Naive Bayes, naiveBayes from e1071 assumes that the numerical variable is normally distributed, but here it is exponentially distributed. So we need to bin any value >= say 5 as a bin, and then dummify this column.
+3. For KNN, since value 5 is closer to 7 then to 3, we need to bin any value >= say 5 as 5 (as a bin), before normalising this column.
+4. No need to do anything to this column if we use tree based models.
 
 ```{r}
-data = as.data.frame(unclass(data), stringsAsFactors=TRUE) # Imputer requires factors.
+table(data$numHandsets)
 ```
 
-
-```{r}
-table(imp$data$regionType)
-```
-
-```{r}
-
-```
-
-
-```{r}
-hist(imp$data$age)
-```
+### currentHandsetPrice
 
 Is zero currentHandsetPrice due to value being missing or customers getting free phones from mobile plans?
-Choosing the later is safer.
+Choosing the later is safer. We will not set zero as NA.
 ```{r}
 table(data$currentHandsetPrice)
 ```
 
+### age
+
+```{r}
+hist(data$age)
+```
+
 ```{r}
 data$age[data$age == 0] = NA
+```
 
 
+## Imputation
+
+Imputer requires factors for non-numerical columns.
+```{r}
+data = as.data.frame(unclass(data), stringsAsFactors=TRUE)
 ```
 
 See a whole list of available imputation learners by running the two lines in below.
@@ -93,22 +114,42 @@ imp = impute(data,
                  regionType = imputeLearner("classif.cforest"),
                  age = imputeLearner("regr.cforest")
              )
-
-             #dummy.cols = c("Solar.R", "Wind")
-             )
+            )
 ```
 
-For numHandsets:
-1. For Logistic Regression, we need to bin any value >= say 5 as 5 (as a bin). 
-2. For Naive Bayes from e1071 assumes that the numerical variable is normally distributed, but here it is exponentially distributed. So we need to bin any value >= say 5 as a bin, and then dummify this column.
-3. For KNN, since value 5 is closer to 7 then to 3, we need to bin any value >= say 5 as 5 (as a bin), before normalising this column.
-4. No need to do anything to this column if we use tree based models.
-
+Let's see how is the result?
+The attempt to impute regionType seems to be a failure. Almost all missing values were assigned to "suburban".
 ```{r}
-table(data$numHandsets)
+table(imp$data$regionType)
 ```
 
+The attempt to impute age seems good.
+```{r}
+hist(imp$data$age)
+```
 
+Now imp$data is our new data.
+Also, give up imputing regionType. Simply fill missing values in regionType by any string.
+```{r}
+data_imputed = imp$data
+
+data_imputed$regionType = data$regionType
+levels(data_imputed$regionType) = c(levels(data_imputed$regionType), 'missing')
+data_imputed$regionType[is.na(data_imputed$regionType)] = 'missing'
+```
+
+## Binning
+
+## Normalisation
+
+## Dummify
+
+In this example, for each categorical variable column, for n factor levels there will be n - 1 dummy variables (the first factor level will be dropped).
+```{r}
+data_dummified = createDummyFeatures(data_imputed, target = 'churn', method = "reference", cols = NULL)
+```
+
+## Split data
 
 
 
