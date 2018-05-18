@@ -5,6 +5,8 @@ output: html_notebook
 
 ```{r}
 library(mlr)
+library(ggplot2)
+library(robustHD)
 library(readr)
 data <- read_csv("E:/bitbucket_warehouse/side_projects/phone_churn/dataset/ACMETelephoneABT.csv")
 ```
@@ -18,7 +20,7 @@ table(data$churn)
 ```
 
 # Data processing
-Notice that only columns that need modifications are mentioned.
+Notice that only columns that need processing are mentioned.
 
 ### How many values are missing in each column?
 ```{r}
@@ -68,10 +70,11 @@ data$creditCard[data$creditCard == 'yes'] = 'true'
 
 ### numHandsets
 
-numHandsets is just one of numerical columns which require different handling for different models. 
-1. For Logistic Regression, we need to bin any value >= say 5 as 5 (as a bin). 
-2. For Naive Bayes, naiveBayes from e1071 assumes that the numerical variable is normally distributed, but here it is exponentially distributed. So we need to bin any value >= say 5 as a bin, and then dummify this column.
-3. For KNN, since value 5 is closer to 7 then to 3, we need to bin any value >= say 5 as 5 (as a bin), before normalising this column.
+numHandsets is just one of numerical columns which require different handling for different models.
+
+1. For Logistic Regression, we need to bin any value >= say 3 as 3 (as a bin). 
+2. For Naive Bayes, naiveBayes from e1071 assumes that the numerical variable is normally distributed, but here numHandsets is exponentially distributed. Therefore, we can bin any value >= say 3 as a bin, and then dummify this column. For simplicity, we can also let e1071 naiveBayes put a normal distribution assumption on this exponential distribution.
+3. For KNN, since value 3 is in the context more similar to 6 then to 0, we need to make value 0 further from other values, before normalising this column.
 4. No need to do anything to this column if we use tree based models.
 
 ```{r}
@@ -80,8 +83,8 @@ table(data$numHandsets)
 
 ### currentHandsetPrice
 
-Is zero currentHandsetPrice due to value being missing or customers getting free phones from mobile plans?
-Choosing the later is safer. We will not set zero as NA.
+Is zero currentHandsetPrice due to value being missing or customers getting free phones from mobile plans? Choosing the later is safer. We will not set zero as NA.
+
 ```{r}
 table(data$currentHandsetPrice)
 ```
@@ -105,8 +108,11 @@ data = as.data.frame(unclass(data), stringsAsFactors=TRUE)
 ```
 
 See a whole list of available imputation learners by running the two lines in below.
-For numerical missing values:   listLearners("regr", properties = "missings")[c("class", "package")]
-For categorical missing values: listLearners("classif", properties = "missings")[c("class", "package")]
+
+* For numerical missing values:   listLearners("regr", properties = "missings")[c("class", "package")]
+* For categorical missing values: listLearners("classif", properties = "missings")[c("class", "package")]
+
+This will take 10 mins to run.
 ```{r}
 imp = impute(data, 
              target = "churn", # Tell the algorithm not to use information in the target column for imputation.
@@ -138,16 +144,56 @@ levels(data_imputed$regionType) = c(levels(data_imputed$regionType), 'missing')
 data_imputed$regionType[is.na(data_imputed$regionType)] = 'missing'
 ```
 
-## Binning
-
-## Normalisation
-
 ## Dummify
 
 In this example, for each categorical variable column, for n factor levels there will be n - 1 dummy variables (the first factor level will be dropped).
 ```{r}
 data_dummified = createDummyFeatures(data_imputed, target = 'churn', method = "reference", cols = NULL)
 ```
+
+## The data is now ready for tree based models. Need more processing steps to get it ready for KNN.
+
+## Logging, a special handling for this example
+
+We will log all exponentially distributed columns. The zero values will be seperated from other values, which will enable the distances considered in KNN to reflect the context.
+
+This transformation still will not make the variable normal enough for Naive Bayes' assumption. 
+```{r}
+library(MASS)
+x = log(data_dummified$currentHandsetPrice + 1)
+fit <- fitdistr(x, "normal")
+para <- fit$estimate
+hist(x, prob = TRUE, breaks = 30)
+curve(dnorm(x, para[1], para[2]), col = 2, add = TRUE)
+```
+
+
+```{r}
+data_dummified$numHandsets = log(data_dummified$numHandsets)
+data_dummified$currentHandsetPrice = log(data_dummified$currentHandsetPrice + 1)
+data_dummified$avgOverBundleMins = log(data_dummified$avgOverBundleMins + 1)
+data_dummified$avgRoamCalls = log(data_dummified$avgRoamCalls + 1)
+data_dummified$avgReceivedMins = log(data_dummified$avgReceivedMins + 1)
+data_dummified$avgOutCalls = log(data_dummified$avgOutCalls + 1)
+data_dummified$avgInCalls = log(data_dummified$avgInCalls + 1)
+data_dummified$peakOffPeakRatio = log(data_dummified$peakOffPeakRatio + 1)
+data_dummified$avgDroppedCalls = log(data_dummified$avgDroppedCalls + 1)
+data_dummified$lastMonthCustomerCareCalls = log(data_dummified$lastMonthCustomerCareCalls + 1)
+data_dummified$numRetentionCalls = log(data_dummified$numRetentionCalls + 1)
+data_dummified$numRetentionOffersAccepted = log(data_dummified$numRetentionOffersAccepted + 1)
+data_dummified$newFrequentNumbers = log(data_dummified$newFrequentNumbers + 1)
+```
+
+## Standardisation
+
+```{r}
+nums <- unlist(lapply(x, function(x) max(x) == 1 ))  
+
+data_standardised = sapply(data_dummified, Standardisation)#function(x) sum(is.na(x)))
+```
+
+
+
 
 ## Split data
 
