@@ -33,13 +33,6 @@ Too many NAs in occupation. Assign missing. No imputing.
 data$occupation[is.na(data$occupation)] = 'missing'
 ```
 
-### Small fix
-As of May 2018, createDummyFeatures, the function that will be used for dummification, has column naming problem. Need to change "true" to "yes", "false" to "no".
-```{r}
-data[data == 'true'] = 'yes'
-data[data == 'false'] = 'no'
-```
-
 ### Save a copy
 ```{r}
 data_no_handling = data
