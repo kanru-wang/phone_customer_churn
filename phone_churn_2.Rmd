@@ -5,9 +5,6 @@ output: html_notebook
 
 # Split data
 ```{r}
-#task = makeClassifTask(data = data_dummified,
-#                       target = 'churn')
-
 data_split = makeResampleInstance(desc = 'Holdout', 
                                   task = makeClassifTask(data = data_dummified,
                                                          target = 'churn'),
@@ -15,32 +12,61 @@ data_split = makeResampleInstance(desc = 'Holdout',
                                   stratify = TRUE)
 ```
 
+# Tune a model
+
+### Decision Tree
+Apart from the following process, in Week 8 Warm Up, function makeTuneWrapper provides more convenience.
 ```{r}
 rdesc = makeResampleDesc("CV", iters = 5, stratify = TRUE)
-task = makeClassifTask(data = data_dummified[data_split$train.inds[[1]],  ],
-                       target = 'churn')
-lrn = makeLearner(cl = "classif.rpart",
-                  parms = list(split = "information"),
-                  predict.type ='prob')
-r = resample(lrn, task, rdesc)
+task = makeClassifTask(data = data_dummified[data_split$train.inds[[1]],  ], target = 'churn')
+lrn = makeLearner(cl = "classif.rpart", predict.type ='prob')
+ps = makeParamSet(makeNumericParam('cp', lower = 0.002, upper = 0.1))
+ctrl = makeTuneControlRandom(maxit = 30L)
+res = tuneParams(learner = lrn,
+                 task = task,
+                 resampling = rdesc,
+                 par.set = ps,
+                 control = ctrl,
+                 show.info =FALSE)
 ```
 
+### Optional: See if there is still potential to improve parameter values.
 ```{r}
-predList = getRRPredictionList(r)
-calculateConfusionMatrix(predList$test$`1`)
+psdata = generateHyperParsEffectData(res)
+plotHyperParsEffect(psdata, x = "iteration", y = "mmce.test.mean", plot.type = "line")
 ```
 
-# Parameter tuning?
-
+### Optional: Visualisation of the best parameter value. 
+We only tune one parameter in this example. Usually there are more parameters to be tuned and visualisation is hard to generate.
 ```{r}
-tree_mod = train(lrn, task = task)
-test_task = makeClassifTask(data = data_dummified[data_split$test.inds[[1]],  ],
-                            target = 'churn')
-pred_on_test = predict(tree_mod,  test_task)
+plot(psdata$data[,1], psdata$data$mmce.test.mean, 
+     xlab = "parameter_value", ylab  ="mmce.test.mean")
+```
+
+### Construct a learner with the tuned parameters.
+```{r}
+tuned_lrn = setHyperPars(lrn, par.vals = res$x)
+```
+
+# Predit
+```{r}
+m = train(learner = tuned_lrn, task = task)
+task_test = makeClassifTask(data = data_dummified[data_split$test.inds[[1]],  ], target = 'churn')
+pred_on_test = predict(object = m, task = task_test)
+```
+
+# Evaluation
+
+We may get the confusion matrix by running 
+calculateConfusionMatrix(pred_on_test), 
+but more importantly, we need to get the ROC.
+```{r}
 d = generateThreshVsPerfData(pred_on_test, measures = list(fpr, tpr))
 plotROCCurves(d)
+```
 
-#generateThreshVsPerfData(list(rpart  =pred1,kknn  =pred2),measures  =list(fpr,  tpr))
+```{r}
+performance(pred_on_test, measures = auc)
 ```
 
 
@@ -55,10 +81,4 @@ lrns = list(
 bmr = benchmark(lrns, task, rdesc)
 ```
 
-```{r}
-#pred = getBMRPredictions(bmr)
-#performance(pred$`data_dummified[data_split$train.inds[[1]], ]`$decisionTree)
-#performance(pred$`data_dummified[data_split$train.inds[[1]], ]`$KNN)
-#performance(pred$`data_dummified[data_split$train.inds[[1]], ]`$naiveBayes)
-```
 
