@@ -1,0 +1,64 @@
+---
+title: "phone_churn_2"
+output: html_notebook
+---
+
+# Split data
+```{r}
+#task = makeClassifTask(data = data_dummified,
+#                       target = 'churn')
+
+data_split = makeResampleInstance(desc = 'Holdout', 
+                                  task = makeClassifTask(data = data_dummified,
+                                                         target = 'churn'),
+                                  split = 0.8,
+                                  stratify = TRUE)
+```
+
+```{r}
+rdesc = makeResampleDesc("CV", iters = 5, stratify = TRUE)
+task = makeClassifTask(data = data_dummified[data_split$train.inds[[1]],  ],
+                       target = 'churn')
+lrn = makeLearner(cl = "classif.rpart",
+                  parms = list(split = "information"),
+                  predict.type ='prob')
+r = resample(lrn, task, rdesc)
+```
+
+```{r}
+predList = getRRPredictionList(r)
+calculateConfusionMatrix(predList$test$`1`)
+```
+
+# Parameter tuning?
+
+```{r}
+tree_mod = train(lrn, task = task)
+test_task = makeClassifTask(data = data_dummified[data_split$test.inds[[1]],  ],
+                            target = 'churn')
+pred_on_test = predict(tree_mod,  test_task)
+d = generateThreshVsPerfData(pred_on_test, measures = list(fpr, tpr))
+plotROCCurves(d)
+
+#generateThreshVsPerfData(list(rpart  =pred1,kknn  =pred2),measures  =list(fpr,  tpr))
+```
+
+
+
+# Comparing models side by side
+```{r}
+lrns = list(
+  makeLearner("classif.rpart",id ="decisionTree", predict.type ='prob'),
+  makeLearner("classif.kknn",id ="KNN", predict.type ='prob', k = 3),
+  makeLearner("classif.naiveBayes",id ="naiveBayes", predict.type ='prob')
+  )
+bmr = benchmark(lrns, task, rdesc)
+```
+
+```{r}
+#pred = getBMRPredictions(bmr)
+#performance(pred$`data_dummified[data_split$train.inds[[1]], ]`$decisionTree)
+#performance(pred$`data_dummified[data_split$train.inds[[1]], ]`$KNN)
+#performance(pred$`data_dummified[data_split$train.inds[[1]], ]`$naiveBayes)
+```
+
