@@ -5,10 +5,11 @@ output: html_notebook
 
 # Split data
 ```{r}
+set.seed(1234)
 data_split = makeResampleInstance(desc = 'Holdout', 
                                   task = makeClassifTask(data = data_dummified,
                                                          target = 'churn'),
-                                  split = 0.8,
+                                  split = 0.7,
                                   stratify = TRUE)
 ```
 
@@ -19,40 +20,87 @@ Apart from the following process, in Week 8 Warm Up, function makeTuneWrapper pr
 ```{r}
 rdesc = makeResampleDesc("CV", iters = 5, stratify = TRUE)
 task = makeClassifTask(data = data_dummified[data_split$train.inds[[1]],  ], target = 'churn')
-lrn = makeLearner(cl = "classif.rpart", predict.type ='prob')
-ps = makeParamSet(makeNumericParam('cp', lower = 0.002, upper = 0.1))
-ctrl = makeTuneControlRandom(maxit = 30L)
-res = tuneParams(learner = lrn,
-                 task = task,
-                 resampling = rdesc,
-                 par.set = ps,
-                 control = ctrl,
-                 show.info =FALSE)
+lrn_tree = makeLearner(cl = "classif.rpart", predict.type ='prob')
+ps_tree = makeParamSet(makeNumericParam('cp', lower = 0.001, upper = 0.03),
+                  makeIntegerParam('maxdepth', lower = 2, upper = 30))
+ctrl_tree = makeTuneControlRandom(maxit = 40L)
+res_tree = tuneParams(learner = lrn_tree,
+                      task = task,
+                      resampling = rdesc,
+                      par.set = ps_tree,
+                      control = ctrl_tree,
+                      show.info =FALSE)
 ```
 
 ### Optional: See if there is still potential to improve parameter values.
 ```{r}
-psdata = generateHyperParsEffectData(res)
-plotHyperParsEffect(psdata, x = "iteration", y = "mmce.test.mean", plot.type = "line")
-```
-
-### Optional: Visualisation of the best parameter value. 
-We only tune one parameter in this example. Usually there are more parameters to be tuned and visualisation is hard to generate.
-```{r}
-plot(psdata$data[,1], psdata$data$mmce.test.mean, 
-     xlab = "parameter_value", ylab  ="mmce.test.mean")
+psdata_tree = generateHyperParsEffectData(res_tree)
+plotHyperParsEffect(psdata_tree, x = "iteration", y = "mmce.test.mean", plot.type = "line")
 ```
 
 ### Construct a learner with the tuned parameters.
 ```{r}
-tuned_lrn = setHyperPars(lrn, par.vals = res$x)
+lrn_tree_tuned = setHyperPars(lrn_tree, par.vals = res_tree$x)
 ```
 
-# Predit
+# Feature Selection
 ```{r}
-m = train(learner = tuned_lrn, task = task)
+ncol(data)
+```
+
+### Run spsa on tuned and not-tuned learner
+```{r}
+spsaMod_tree_tuned = spFeatureSelection(task, wrapper = lrn_tree_tuned, 
+                              measure = auc, num.features.selected = 0)
+
+spsaMod_tree = spFeatureSelection(task, wrapper = lrn_tree, 
+                              measure = auc, num.features.selected = 0)
+```
+
+### Optional: Save the best features as JSON
+```{r}
+spsaFeatures_tree = list( tunedLearnerFeatures   = spsaMod_tree_tuned$features,
+                     untunedLearnerFeatures = spsaMod_tree$features)
+
+write(toJSON( spsaFeatures_tree, auto_unbox = TRUE, pretty = TRUE, factor = 'string'),
+      'spsaFeatures_tree.txt')
+```
+
+### Extract the spsa task (with the set of reduced number of features)
+```{r}
+spsaTask_tree_tuned = spsaMod_tree_tuned$task.spfs
+spsaBestModel_tree_tuned  = spsaMod_tree_tuned$best.model
+
+spsaTask_tree = spsaMod_tree$task.spfs
+spsaBestModel_tree = spsaMod_tree$best.model
+```
+
+### Importance ploting
+```{r}
+spFSR::getImportance( spsaMod_tree_tuned )
+spFSR::getImportance( spsaMod_tree )
+
+spFSR::plotImportance( spsaMod_tree_tuned )
+spFSR::plotImportance( spsaMod_tree )
+```
+
+# Train models
+Only need to train the model that was tuned but did not go through the feature selection process. No need to train the model given by SPSA, since the "best.model" object from SPSA has already been trained.
+
+```{r}
+m = mlr::train(learner = lrn_tree_tuned, task = task)
+```
+
+# Define the test data (the task)
+```{r}
 task_test = makeClassifTask(data = data_dummified[data_split$test.inds[[1]],  ], target = 'churn')
-pred_on_test = predict(object = m, task = task_test)
+```
+
+# Predict
+```{r}
+pred_on_test       = predict(object = m, task = task_test)
+pred_on_test_spsa_tree_tuned = predict(object = spsaBestModel_tree_tuned, task = task_test)
+pred_on_test_spsa_tree = predict(object = spsaBestModel_tree, task = task_test)
 ```
 
 # Evaluation
@@ -61,24 +109,33 @@ We may get the confusion matrix by running
 calculateConfusionMatrix(pred_on_test), 
 but more importantly, we need to get the ROC.
 ```{r}
-d = generateThreshVsPerfData(pred_on_test, measures = list(fpr, tpr))
-plotROCCurves(d)
+d  = generateThreshVsPerfData(pred_on_test, measures = list(fpr, tpr))
+d_spsa_tree_tuned = generateThreshVsPerfData(pred_on_test_spsa_tree_tuned, measures = list(fpr, tpr))
+d_spsa_tree = generateThreshVsPerfData(pred_on_test_spsa_tree, measures = list(fpr, tpr))
+
+p = plotROCCurves(d) + labs(title = 'ROC curve of the tuned rpart learner', x = "")
+p_spsa_tree_tuned = plotROCCurves(d_spsa_tree_tuned) + 
+  labs(title = 'ROC curve of the tuned rpart learner with SPSA', x = "")
+p_spsa_tree = plotROCCurves(d_spsa_tree) + labs(title = 'ROC curve of the original rpart learner with SPSA')
+
+library(cowplot)
+plot_grid(p, p_spsa_tree_tuned, p_spsa_tree, align = 'v', ncol = 1) # Run this line in console to visualise better.
 ```
+
+### Remark:
+
+1. pred_on_test is based on the tuned learner
+2. pred_on_test_spsa_tree_tuned is based on the tuned learner + spsa
+3. pred_on_test_spsa_tree is based on the original learner + spsa
+Tuning and running spsa yield the best result.
 
 ```{r}
-performance(pred_on_test, measures = auc)
+performance(pred_on_test,  measures = auc)
+performance(pred_on_test_spsa_tree_tuned, measures = auc)
+performance(pred_on_test_spsa_tree, measures = auc)
 ```
 
 
 
-# Comparing models side by side
-```{r}
-lrns = list(
-  makeLearner("classif.rpart",id ="decisionTree", predict.type ='prob'),
-  makeLearner("classif.kknn",id ="KNN", predict.type ='prob', k = 3),
-  makeLearner("classif.naiveBayes",id ="naiveBayes", predict.type ='prob')
-  )
-bmr = benchmark(lrns, task, rdesc)
-```
 
 

@@ -3,15 +3,23 @@ title: "phone_churn"
 output: html_notebook
 ---
 
+Make sure there is no error message.
 ```{r}
 library(mlr)
 library(ggplot2)
 library(robustHD)
 library(readr)
+library(caret)
+library(spFSR)
+library(jsonlite)
 data <- read_csv("E:/bitbucket_warehouse/side_projects/phone_churn/dataset/ACMETelephoneABT.csv")
 ```
 
-We call a dataset imbalanced when the target variable is dominated by one class. Always, we more care about the minority class(es) than the dominant (majority) class. When we train a model, the training aims to reduce the error rate. The trained model may reluctantly or over-conservatively classify any observation as the minority class. Adjusting the classfication threshold in order to create more minority predictions is a good fix, but more can be done. We can make the dataset less imbalanced so that the model really learn about the characteristics of the minority class observations.
+We call a dataset imbalanced when the target variable is dominated by one class. Always, we more care about the minority class(es) than the dominant (majority) class. When we train a model, the training aims to reduce the error rate. The trained model may reluctantly or over-conservatively classify any observation as the minority class. 
+
+Here is an extreme example. When data is very imbalanced, say, 99% of the observations are in the majority class, a decision tree will likely to not split at all and predict anything as a majority class case. This model is certainly not useful and we need fix the problem by making the training data more balanced.
+
+Adjusting the classfication threshold in order to create more minority predictions is a good fix, but more can be done. We can make the dataset less imbalanced so that the model really learn about the characteristics of the minority class observations.
 
 This dataset is perfectly balanced as the company that provided this dataset had already undersampled the majority class (customer who stay), while keep all minority customer rows (churned customers). In reality, we may instead oversample the abnormal customers, while keep all normal customers. It is not necessary to make two classes 50% 50% balanced.
 
@@ -74,9 +82,8 @@ data$creditCard[data$creditCard == 'yes'] = 'true'
 numHandsets is just one of numerical columns which require different handling for different models.
 
 1. For Logistic Regression, we need to bin any value >= say 3 as 3 (as a bin). 
-2. For Naive Bayes, naiveBayes from e1071 assumes that the numerical variable is normally distributed, but here numHandsets is exponentially distributed. Therefore, we can bin any value >= say 3 as a bin, and then dummify this column. For simplicity, we can also let e1071 naiveBayes put a normal distribution assumption on this exponential distribution.
-3. For KNN, since value 3 is in the context more similar to 6 then to 0, we need to make value 0 further from other values, before normalising this column.
-4. No need to do anything to this column if we use tree based models.
+2. For Naive Bayes, naiveBayes from e1071 assumes that the numerical variable is normally distributed, but here numHandsets follows Poisson distribution (many other columns follow Zero-inflated Poisson or Exponential distribution). Therefore, we can bin any value >= say 3 as a bin, and then dummify this column. Alternatively, we can apply Box-cox transformation on the data in hope that it will become normal.
+3. No need to do anything to this column if we use tree based models.
 
 ```{r}
 table(data$numHandsets)
@@ -145,38 +152,51 @@ levels(data_imputed$regionType) = c(levels(data_imputed$regionType), 'missing')
 data_imputed$regionType[is.na(data_imputed$regionType)] = 'missing'
 ```
 
-## Now if we jump to run the "Dummify" chunk, the data will be ready for tree based models. Here we just need more processing steps to get it ready for KNN.
+## Now if we jump to run the "Dummify" chunk, the data will be ready for tree based models. Here we just need more processing steps to get it ready for Naive Bayes and KNN.
 
-## Logging, a special handling for this example
+## Box-cox Transformation, a special handling for this example
 
-We will log all exponentially distributed columns. The zero values will be seperated from other values, which will enable the distances considered in KNN to reflect the context.
+You will see that it does not solve the problem in this case, but it is a general way to make a column normally distributed.
 
-This transformation still will not make the variable normal enough for Naive Bayes' assumption. 
+First, we define a function which takes a column, transforms and returns the transformed column.
 
 ```{r}
-library(MASS)
-x = log(data_imputed$currentHandsetPrice + 1)
-fit <- fitdistr(x, "normal")
-para <- fit$estimate
-hist(x, prob = TRUE, breaks = 30)
-curve(dnorm(x, para[1], para[2]), col = 2, add = TRUE)
+BoxCoxTransformation = function(original_data) {
+  lambda = BoxCoxTrans(original_data)$lambda
+  if (lambda == 0) {
+    return(log(original_data))
+  } else {
+    return((original_data ** lambda - 1)/ lambda)
+  }
+}
 ```
 
+Before:
 
 ```{r}
-data_imputed$numHandsets = log(data_imputed$numHandsets)
-data_imputed$currentHandsetPrice = log(data_imputed$currentHandsetPrice + 1)
-data_imputed$avgOverBundleMins = log(data_imputed$avgOverBundleMins + 1)
-data_imputed$avgRoamCalls = log(data_imputed$avgRoamCalls + 1)
-data_imputed$avgReceivedMins = log(data_imputed$avgReceivedMins + 1)
-data_imputed$avgOutCalls = log(data_imputed$avgOutCalls + 1)
-data_imputed$avgInCalls = log(data_imputed$avgInCalls + 1)
-data_imputed$peakOffPeakRatio = log(data_imputed$peakOffPeakRatio + 1)
-data_imputed$avgDroppedCalls = log(data_imputed$avgDroppedCalls + 1)
-data_imputed$lastMonthCustomerCareCalls = log(data_imputed$lastMonthCustomerCareCalls + 1)
-data_imputed$numRetentionCalls = log(data_imputed$numRetentionCalls + 1)
-data_imputed$numRetentionOffersAccepted = log(data_imputed$numRetentionOffersAccepted + 1)
-data_imputed$newFrequentNumbers = log(data_imputed$newFrequentNumbers + 1)
+hist(data_imputed$numHandsets)
+```
+
+After:
+
+```{r}
+hist(BoxCoxTransformation(data_imputed$numHandsets))
+```
+
+```{r}
+data_imputed$numHandsets = BoxCoxTransformation(data_imputed$numHandsets)
+data_imputed$currentHandsetPrice = BoxCoxTransformation(data_imputed$currentHandsetPrice + 1)
+data_imputed$avgOverBundleMins = BoxCoxTransformation(data_imputed$avgOverBundleMins + 1)
+data_imputed$avgRoamCalls = BoxCoxTransformation(data_imputed$avgRoamCalls + 1)
+data_imputed$avgReceivedMins = BoxCoxTransformation(data_imputed$avgReceivedMins + 1)
+data_imputed$avgOutCalls = BoxCoxTransformation(data_imputed$avgOutCalls + 1)
+data_imputed$avgInCalls = BoxCoxTransformation(data_imputed$avgInCalls + 1)
+data_imputed$peakOffPeakRatio = BoxCoxTransformation(data_imputed$peakOffPeakRatio + 1)
+data_imputed$avgDroppedCalls = BoxCoxTransformation(data_imputed$avgDroppedCalls + 1)
+data_imputed$lastMonthCustomerCareCalls = BoxCoxTransformation(data_imputed$lastMonthCustomerCareCalls + 1)
+data_imputed$numRetentionCalls = BoxCoxTransformation(data_imputed$numRetentionCalls + 1)
+data_imputed$numRetentionOffersAccepted = BoxCoxTransformation(data_imputed$numRetentionOffersAccepted + 1)
+data_imputed$newFrequentNumbers = BoxCoxTransformation(data_imputed$newFrequentNumbers + 1)
 ```
 
 ## Standardisation
