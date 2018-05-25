@@ -1,3 +1,6 @@
 dataset/
 phone_churn2.R
 *.RData
+phone_churn_3.nb.html
+phone_churn_3.Rmd
+spsaFeatures_tree.txt

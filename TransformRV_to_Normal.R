@@ -42,5 +42,9 @@ shapiro.test(rv.transformed)
 
 BoxCoxTransformation = function(original_data) {
   lambda = BoxCoxTrans(original_data)$lambda
-  return((original_data ** lambda - 1)/ lambda)
+  if (lambda == 0) {
+    return(log(original_data))
+  } else {
+    return((original_data ** lambda - 1)/ lambda)
+  }
 }

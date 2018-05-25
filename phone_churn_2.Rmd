@@ -4,25 +4,48 @@ output: html_notebook
 ---
 
 # Split data
+
+This churn_index will help randomly select 555 observations from the churn class.
 ```{r}
-set.seed(1234)
-data_split = makeResampleInstance(desc = 'Holdout', 
-                                  task = makeClassifTask(data = data_dummified,
-                                                         target = 'churn'),
-                                  split = 0.7,
-                                  stratify = TRUE)
+churn_index = which(data_dummified$churn %in% c('true'))[sample.int(5000, 5000 / 9)]
+length(churn_index)
 ```
 
-# Tune a model
+data_dummified_restored_original_prop has 5000 + 555 = 5555 observations.
+```{r}
+data_dummified_not_churn = data_dummified[data_dummified$churn == 'false', ]
+data_dummified_churn_subset = data_dummified[churn_index, ]
+data_dummified_restored_original_prop = rbind(data_dummified_not_churn, data_dummified_churn_subset)
+```
 
-### Decision Tree
+One dataset for decision tree and one dataset for KNN and NB.
+```{r}
+set.seed(123)
+data_split_for_tree = makeResampleInstance(desc = 'Holdout', 
+                                           task = makeClassifTask(data = data_dummified,
+                                                                  target = 'churn'),
+                                           split = 0.7,
+                                           stratify = TRUE)
+
+data_split_for_KNN_and_NB = 
+  makeResampleInstance(desc = 'Holdout', 
+                       task = makeClassifTask(data = data_dummified_restored_original_prop,
+                                              target = 'churn'),
+                       split = 0.7,
+                       stratify = TRUE)
+
+```
+
+
+# Decision Tree
+
 Apart from the following process, in Week 8 Warm Up, function makeTuneWrapper provides more convenience.
 ```{r}
 rdesc = makeResampleDesc("CV", iters = 5, stratify = TRUE)
-task = makeClassifTask(data = data_dummified[data_split$train.inds[[1]],  ], target = 'churn')
+task = makeClassifTask(data = data_dummified[data_split_for_tree$train.inds[[1]],  ], target = 'churn')
 lrn_tree = makeLearner(cl = "classif.rpart", predict.type ='prob')
 ps_tree = makeParamSet(makeNumericParam('cp', lower = 0.001, upper = 0.03),
-                  makeIntegerParam('maxdepth', lower = 2, upper = 30))
+                       makeIntegerParam('maxdepth', lower = 2, upper = 30))
 ctrl_tree = makeTuneControlRandom(maxit = 40L)
 res_tree = tuneParams(learner = lrn_tree,
                       task = task,
@@ -43,7 +66,7 @@ plotHyperParsEffect(psdata_tree, x = "iteration", y = "mmce.test.mean", plot.typ
 lrn_tree_tuned = setHyperPars(lrn_tree, par.vals = res_tree$x)
 ```
 
-# Feature Selection
+## Feature Selection
 ```{r}
 ncol(data)
 ```
@@ -84,26 +107,26 @@ spFSR::plotImportance( spsaMod_tree_tuned )
 spFSR::plotImportance( spsaMod_tree )
 ```
 
-# Train models
+## Train models
 Only need to train the model that was tuned but did not go through the feature selection process. No need to train the model given by SPSA, since the "best.model" object from SPSA has already been trained.
 
 ```{r}
 m = mlr::train(learner = lrn_tree_tuned, task = task)
 ```
 
-# Define the test data (the task)
+## Define the test data (the task)
 ```{r}
-task_test = makeClassifTask(data = data_dummified[data_split$test.inds[[1]],  ], target = 'churn')
+task_test = makeClassifTask(data = data_dummified[data_split_for_tree$test.inds[[1]],  ], target = 'churn')
 ```
 
-# Predict
+## Predict
 ```{r}
 pred_on_test       = predict(object = m, task = task_test)
 pred_on_test_spsa_tree_tuned = predict(object = spsaBestModel_tree_tuned, task = task_test)
 pred_on_test_spsa_tree = predict(object = spsaBestModel_tree, task = task_test)
 ```
 
-# Evaluation
+## Evaluation
 
 We may get the confusion matrix by running 
 calculateConfusionMatrix(pred_on_test), 
@@ -122,11 +145,12 @@ library(cowplot)
 plot_grid(p, p_spsa_tree_tuned, p_spsa_tree, align = 'v', ncol = 1) # Run this line in console to visualise better.
 ```
 
-### Remark:
+## Remark
 
 1. pred_on_test is based on the tuned learner
 2. pred_on_test_spsa_tree_tuned is based on the tuned learner + spsa
 3. pred_on_test_spsa_tree is based on the original learner + spsa
+
 Tuning and running spsa yield the best result.
 
 ```{r}
@@ -135,7 +159,95 @@ performance(pred_on_test_spsa_tree_tuned, measures = auc)
 performance(pred_on_test_spsa_tree, measures = auc)
 ```
 
+# KNN
+
+We will first tune the model and then do SPSA feature selection. The process is very similar to decision tree modelling, but the visualisation is skipped.
+```{r}
+CV_and_train_data_KNN_and_NB =
+  data_dummified_restored_original_prop[data_split_for_KNN_and_NB$train.inds[[1]],]
+test_data_KNN_and_NB =
+  data_dummified_restored_original_prop[data_split_for_KNN_and_NB$test.inds[[1]],]
+
+rdesc = makeResampleDesc("CV", iters = 5, stratify = TRUE)
+task = makeClassifTask(data = CV_and_train_data_KNN_and_NB, target = 'churn')
+lrn_KNN = makeLearner(cl = "classif.kknn", predict.type ='prob')
+ps_KNN = makeParamSet(makeIntegerParam('k', lower = 1, upper = 30))
+ctrl_KNN = makeTuneControlGrid()
+res_KNN = tuneParams(learner = lrn_KNN,
+                      task = task,
+                      resampling = rdesc,
+                      par.set = ps_KNN,
+                      control = ctrl_KNN,
+                      show.info =FALSE)
+
+lrn_KNN_tuned = setHyperPars(lrn_KNN, par.vals = res_KNN$x)
+
+spsaMod_KNN_tuned = spFeatureSelection(task, 
+                                       wrapper = lrn_KNN_tuned, 
+                                       measure = auc, 
+                                       num.features.selected = 0)
+
+task_test = makeClassifTask(data = test_data_KNN_and_NB, target = 'churn')
+
+pred_on_test_spsa_KNN_tuned = predict(object = spsaMod_KNN_tuned$best.model,
+                                      task = task_test)
+
+performance(pred_on_test_spsa_KNN_tuned, measures = auc)
+```
+
+### Take a look at the best hyperparameter.
+```{r}
+lrn_KNN_tuned
+```
 
 
+# Naive Bayes
+
+We will first tune the model and then do SPSA feature selection. The process is very similar to decision tree modelling, but the visualisation is skipped.
+```{r}
+CV_and_train_data_KNN_and_NB =
+  data_dummified_restored_original_prop[data_split_for_KNN_and_NB$train.inds[[1]],]
+test_data_KNN_and_NB =
+  data_dummified_restored_original_prop[data_split_for_KNN_and_NB$test.inds[[1]],]
+
+rdesc = makeResampleDesc("CV", iters = 5, stratify = TRUE)
+task = makeClassifTask(data = CV_and_train_data_KNN_and_NB, target = 'churn')
+lrn_NB = makeLearner(cl = "classif.naiveBayes", predict.type ='prob')
+ps_NB = makeParamSet(makeNumericParam('laplace', lower = 0, upper = 10))
+ctrl_NB = makeTuneControlRandom(maxit = 20L)
+res_NB = tuneParams(learner = lrn_NB,
+                      task = task,
+                      resampling = rdesc,
+                      par.set = ps_NB,
+                      control = ctrl_NB,
+                      show.info =FALSE)
+
+lrn_NB_tuned = setHyperPars(lrn_NB, par.vals = res_NB$x)
+
+spsaMod_NB_tuned = spFeatureSelection(task, 
+                                      wrapper = lrn_NB_tuned, 
+                                      measure = auc, 
+                                      num.features.selected = 0)
+
+task_test = makeClassifTask(data = test_data_KNN_and_NB, target = 'churn')
+
+pred_on_test_spsa_NB_tuned = predict(object = spsaMod_NB_tuned$best.model,
+                                     task = task_test)
+
+performance(pred_on_test_spsa_NB_tuned, measures = auc)
+```
+
+### Take a look at the best hyperparameter.
+```{r}
+lrn_NB_tuned
+```
+
+# Conclusion
+
+* AUC Decision Tree: 0.60
+* AUC KNN: 0.55
+* AUC Naive Bayes:0.61
+
+Decision Tree and Naive Bayes are good models for our dataset.
 
 
